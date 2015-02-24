@@ -18,6 +18,8 @@
 #![crate_type = "dylib"]
 #![crate_name = "glfw"]
 
+#![feature(core)]
+#![feature(std_misc)]
 #![feature(unsafe_destructor)]
 
 #![allow(non_upper_case_globals)]
@@ -72,7 +74,7 @@ extern crate bitflags;
 
 use libc::{c_char, c_double, c_float, c_int};
 use libc::{c_ushort, c_void};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::mem;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fmt;
@@ -93,7 +95,7 @@ mod callbacks;
 
 /// Input actions.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Action {
     Release                      = ffi::RELEASE,
     Press                        = ffi::PRESS,
@@ -102,7 +104,7 @@ pub enum Action {
 
 /// Input keys.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show, FromPrimitive)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, FromPrimitive)]
 pub enum Key {
     Space                    = ffi::KEY_SPACE,
     Apostrophe               = ffi::KEY_APOSTROPHE,
@@ -230,7 +232,7 @@ pub enum Key {
 /// Mouse buttons. The `MouseButtonLeft`, `MouseButtonRight`, and
 /// `MouseButtonMiddle` aliases are supplied for convenience.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show, FromPrimitive)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, FromPrimitive)]
 pub enum MouseButton {
     /// The left mouse button. A `MouseButtonLeft` alias is provided to improve clarity.
     Button1                = ffi::MOUSE_BUTTON_1,
@@ -251,13 +253,13 @@ pub enum MouseButton {
 ///
 /// ~~~ignore
 /// assert_eq(format!("{}", glfw::MouseButtonLeft), "MouseButton1");
-/// assert_eq(format!("{}", glfw::ShowAliases(glfw::MouseButtonLeft)), "MouseButtonLeft");
+/// assert_eq(format!("{}", glfw::DebugAliases(glfw::MouseButtonLeft)), "MouseButtonLeft");
 /// ~~~
-pub struct ShowAliases<T>(pub T);
+pub struct DebugAliases<T>(pub T);
 
-impl fmt::Debug for ShowAliases<MouseButton> {
+impl fmt::Debug for DebugAliases<MouseButton> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let ShowAliases(button) = *self;
+        let DebugAliases(button) = *self;
         match button {
             MouseButtonLeft     => write!(f, "MouseButtonLeft"),
             MouseButtonRight    => write!(f, "MouseButtonRight"),
@@ -276,7 +278,7 @@ impl<Fn: Copy, UserData: Copy> Copy for Callback<Fn, UserData> {}
 
 /// Tokens corresponding to various error types.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Error {
     NotInitialized              = ffi::NOT_INITIALIZED,
     NoCurrentContext            = ffi::NO_CURRENT_CONTEXT,
@@ -314,7 +316,7 @@ pub static LOG_ERRORS: Option<ErrorCallback<()>> =
 
 /// Cursor modes.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum CursorMode {
     Normal                = ffi::CURSOR_NORMAL,
     Hidden                = ffi::CURSOR_HIDDEN,
@@ -352,7 +354,7 @@ pub type GLProc = ffi::GLFWglproc;
 pub struct Glfw;
 
 /// An error that might be returned when `glfw::init` is called.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum InitError {
     /// The library was already initialized.
     AlreadyInitialized,
@@ -505,7 +507,7 @@ impl Glfw {
             let mut count = 0;
             let ptr = ffi::glfwGetMonitors(&mut count);
             f(self,
-              slice::from_raw_buf(&(ptr as *const _), count as usize).iter().map(|&ptr| {
+              slice::from_raw_parts(ptr as *const _, count as usize).iter().map(|&ptr| {
                 Monitor {
                     ptr: ptr
                 }
@@ -571,6 +573,8 @@ impl Glfw {
             WindowHint::Resizable(is_resizable)         => unsafe { ffi::glfwWindowHint(ffi::RESIZABLE,             is_resizable as c_int) },
             WindowHint::Visible(is_visible)             => unsafe { ffi::glfwWindowHint(ffi::VISIBLE,               is_visible as c_int) },
             WindowHint::Decorated(is_decorated)         => unsafe { ffi::glfwWindowHint(ffi::DECORATED,             is_decorated as c_int) },
+            WindowHint::AutoIconify(auto_iconify)       => unsafe { ffi::glfwWindowHint(ffi::AUTO_ICONIFY,          auto_iconify as c_int) },
+            WindowHint::Floating(is_floating)           => unsafe { ffi::glfwWindowHint(ffi::FLOATING,              is_floating as c_int) },
         }
     }
 
@@ -730,14 +734,13 @@ pub fn get_version() -> Version {
 
 /// Replacement for `String::from_raw_buf`
 pub unsafe fn string_from_c_str(c_str: *const c_char) -> String {
-    use std::ffi::c_str_to_bytes;
-    String::from_utf8_lossy(c_str_to_bytes(&c_str)).into_owned()
+    String::from_utf8_lossy(CStr::from_ptr(c_str).to_bytes()).into_owned()
 }
 
 /// Replacement for `ToCStr::with_c_str`
 pub fn with_c_str<F, T>(s: &str, f: F) -> T where F: FnOnce(*const c_char) -> T {
-    let c_str = CString::from_slice(s.as_bytes());
-    f(c_str.as_slice_with_nul().as_ptr())
+    let c_str = CString::new(s.as_bytes());
+    f(c_str.unwrap().as_bytes_with_nul().as_ptr() as *const _)
 }
 
 /// Wrapper for `glfwGetVersionString`.
@@ -755,7 +758,7 @@ pub struct Monitor {
     ptr: *mut ffi::GLFWmonitor
 }
 
-impl std::fmt::Show for Monitor {
+impl std::fmt::Debug for Monitor {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Monitor({:p})", self.ptr)
     }
@@ -792,7 +795,7 @@ impl Monitor {
         unsafe {
             let mut count = 0;
             let ptr = ffi::glfwGetVideoModes(self.ptr, &mut count);
-            slice::from_raw_buf(&ptr, count as usize).iter().map(VidMode::from_glfw_vid_mode).collect()
+            slice::from_raw_parts(ptr, count as usize).iter().map(VidMode::from_glfw_vid_mode).collect()
         }
     }
 
@@ -813,11 +816,11 @@ impl Monitor {
         unsafe {
             let llramp = *ffi::glfwGetGammaRamp(self.ptr);
             GammaRamp {
-                red:    slice::from_raw_buf(&(llramp.red as *const c_ushort), llramp.size as usize)
+                red:    slice::from_raw_parts(llramp.red as *const c_ushort, llramp.size as usize)
                               .iter().map(|&x| x).collect(),
-                green:  slice::from_raw_buf(&(llramp.green as *const c_ushort), llramp.size as usize)
+                green:  slice::from_raw_parts(llramp.green as *const c_ushort, llramp.size as usize)
                               .iter().map(|&x| x).collect(),
-                blue:   slice::from_raw_buf(&(llramp.blue as *const c_ushort), llramp.size as usize)
+                blue:   slice::from_raw_parts(llramp.blue as *const c_ushort, llramp.size as usize)
                               .iter().map(|&x| x).collect(),
             }
         }
@@ -841,7 +844,7 @@ impl Monitor {
 
 /// Monitor events.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum MonitorEvent {
     Connected                   = ffi::CONNECTED,
     Disconnected                = ffi::DISCONNECTED,
@@ -880,7 +883,7 @@ impl fmt::Debug for VidMode {
 }
 
 /// Window hints that can be set using the `window_hint` function.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum WindowHint {
     /// Specifies the desired bit depth of the red component of the default framebuffer.
     RedBits(u32),
@@ -974,11 +977,21 @@ pub enum WindowHint {
     ///
     /// This hint is ignored for full screen windows.
     Decorated(bool),
+    /// Specifies whether the (full screen) window will automatically iconify
+    /// and restore the previous video mode on input focus loss.
+    ///
+    /// This hint is ignored for windowed mode windows.
+    AutoIconify(bool),
+    /// Specifies whether the window will be floating above other regular
+    /// windows, also called topmost or always-on-top.
+    ///
+    /// This hint is ignored for full screen windows.
+    Floating(bool),
 }
 
 /// Client API tokens.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum ClientApiHint {
     OpenGl                   = ffi::OPENGL_API,
     OpenGlEs                 = ffi::OPENGL_ES_API,
@@ -986,7 +999,7 @@ pub enum ClientApiHint {
 
 /// Context robustness tokens.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum ContextRobustnessHint {
     NoRobustness                = ffi::NO_ROBUSTNESS,
     NoResetNotification         = ffi::NO_RESET_NOTIFICATION,
@@ -995,7 +1008,7 @@ pub enum ContextRobustnessHint {
 
 /// OpenGL profile tokens.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum OpenGlProfileHint {
     Any            = ffi::OPENGL_ANY_PROFILE,
     Core           = ffi::OPENGL_CORE_PROFILE,
@@ -1003,7 +1016,7 @@ pub enum OpenGlProfileHint {
 }
 
 /// Describes the mode of a window
-#[derive(Copy, Show)]
+#[derive(Copy, Debug)]
 pub enum WindowMode<'a> {
     /// Full screen mode. Contains the monitor on which the window is displayed.
     FullScreen(&'a Monitor),
@@ -1034,7 +1047,7 @@ bitflags! {
     }
 }
 
-impl fmt::Show for Modifiers {
+impl fmt::Debug for Modifiers {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (i, x) in [Shift, Control, Alt, Super].iter().filter(|x| self.contains(**x)).enumerate() {
             if i != 0 { try!(write!(f, ", ")) };
@@ -1051,7 +1064,7 @@ impl fmt::Show for Modifiers {
 pub type Scancode = c_int;
 
 /// Window event messages.
-#[derive(Copy, Clone, PartialEq, PartialOrd, Show)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum WindowEvent {
     Pos(i32, i32),
     Size(i32, i32),
@@ -1087,7 +1100,7 @@ pub fn flush_messages<'a, Message: Send>(receiver: &'a Receiver<Message>) -> Flu
 /// `Receiver`'s queue.
 pub struct FlushedMessages<'a, Message: 'a>(&'a Receiver<Message>);
 
-impl<'a, Message: Send> Iterator for FlushedMessages<'a, Message> {
+impl<'a, Message: 'static + Send> Iterator for FlushedMessages<'a, Message> {
     type Item = Message;
 
     fn next(&mut self) -> Option<Message> {
@@ -1599,7 +1612,7 @@ pub fn make_context_current(context: Option<&Context>) {
 
 /// Joystick identifier tokens.
 #[repr(i32)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Show, FromPrimitive)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, FromPrimitive)]
 pub enum JoystickId {
     Joystick1       = ffi::JOYSTICK_1,
     Joystick2       = ffi::JOYSTICK_2,
@@ -1637,7 +1650,7 @@ impl Joystick {
         unsafe {
             let mut count = 0;
             let ptr = ffi::glfwGetJoystickAxes(self.id as c_int, &mut count);
-            slice::from_raw_buf(&ptr, count as usize).iter().map(|&a| a as f32).collect()
+            slice::from_raw_parts(ptr, count as usize).iter().map(|&a| a as f32).collect()
         }
     }
 
@@ -1646,7 +1659,7 @@ impl Joystick {
         unsafe {
             let mut count = 0;
             let ptr = ffi::glfwGetJoystickButtons(self.id as c_int, &mut count);
-            slice::from_raw_buf(&ptr, count as usize).iter().map(|&b| b as c_int).collect()
+            slice::from_raw_parts(ptr, count as usize).iter().map(|&b| b as c_int).collect()
         }
     }
 
